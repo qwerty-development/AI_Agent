@@ -14,3 +14,10 @@ simple_*.py
 jwt_token.txt
 create_test_*.py
 setup_*.py
+
+
+#Ignore vscode AI rules
+.github\instructions\codacy.instructions.md
+TEST_RESULTS_SUMMARY.md
+.env
+.gitignore

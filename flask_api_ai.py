@@ -7,10 +7,51 @@ import logging
 import jwt
 from supabase import create_client, Client
 from functools import wraps
+import hashlib
+from datetime import datetime, timedelta
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
+
+# Simple in-memory response cache to prevent duplicate LLM calls
+# Cache structure: {cache_key: (response, timestamp)}
+_RESPONSE_CACHE = {}
+_CACHE_TTL = timedelta(minutes=5)  # Cache responses for 5 minutes
+_MAX_CACHE_SIZE = 100  # Prevent memory bloat
+
+def _get_cache_key(message: str, user_id: str = None) -> str:
+    """Generate cache key from message and user_id"""
+    # Normalize message (lowercase, strip whitespace)
+    normalized = message.lower().strip()
+    # Include user_id for personalized responses
+    cache_str = f"{normalized}:{user_id or 'anon'}"
+    return hashlib.md5(cache_str.encode()).hexdigest()
+
+def _get_cached_response(cache_key: str) -> dict:
+    """Get cached response if it exists and is still valid"""
+    if cache_key in _RESPONSE_CACHE:
+        response, timestamp = _RESPONSE_CACHE[cache_key]
+        if datetime.now() - timestamp < _CACHE_TTL:
+            logger.info(f"Cache HIT for key: {cache_key[:8]}...")
+            return response
+        else:
+            # Expired, remove from cache
+            del _RESPONSE_CACHE[cache_key]
+            logger.info(f"Cache EXPIRED for key: {cache_key[:8]}...")
+    return None
+
+def _set_cached_response(cache_key: str, response: dict):
+    """Cache a response with current timestamp"""
+    # Prevent cache from growing too large
+    if len(_RESPONSE_CACHE) >= _MAX_CACHE_SIZE:
+        # Remove oldest entry (simple FIFO)
+        oldest_key = next(iter(_RESPONSE_CACHE))
+        del _RESPONSE_CACHE[oldest_key]
+        logger.info(f"Cache FULL - removed oldest entry")
+
+    _RESPONSE_CACHE[cache_key] = (response, datetime.now())
+    logger.info(f"Cache SET for key: {cache_key[:8]}...")
 
 app = Flask(__name__)
 CORS(app)
@@ -250,15 +291,26 @@ def chat():
         
         logger.info(f"Received message from session {session_id} (user: {user_id}): {user_message}")
         logger.info(f"Conversation history length: {len(conversation_history) if conversation_history else 0}")
-        
+
+        # Check cache for identical recent queries (only for non-conversational requests)
+        # Skip cache if conversation history exists (context-dependent responses)
+        cache_key = None
+        if not conversation_history or len(conversation_history) == 0:
+            cache_key = _get_cache_key(user_message, user_id)
+            cached_response = _get_cached_response(cache_key)
+            if cached_response:
+                logger.info(f"Returning cached response for: {user_message[:50]}...")
+                cached_response['cached'] = True  # Add cache indicator
+                return jsonify(cached_response), 200
+
         # Convert conversation history to LangChain message format if provided
         memory = None
         if conversation_history and isinstance(conversation_history, list):
             try:
                 from AI_Agent import create_conversation_memory
                 from langchain_core.messages import HumanMessage, AIMessage
-                
-                memory = create_conversation_memory(max_history=20)
+
+                memory = create_conversation_memory(max_history=6)
                 
                 # Convert frontend message format to LangChain messages
                 for msg in conversation_history:
@@ -297,14 +349,21 @@ def chat():
                 restaurant_ids = [id.strip() for id in parts[1].strip().split(',') if id.strip()]
                 restaurants_to_show = restaurant_ids
         
-        return jsonify({
+        response_data = {
             'response': response_text,
             'restaurants_to_show': restaurants_to_show,
             'session_id': session_id,
             'user_id': user_id,
             'authenticated': jwt_token is not None,
+            'cached': False,
             'status': 'success'
-        }), 200
+        }
+
+        # Cache the response for future identical queries (only for non-conversational)
+        if cache_key:
+            _set_cached_response(cache_key, response_data)
+
+        return jsonify(response_data), 200
         
     except Exception as e:
         logger.error(f"Error in chat endpoint: {str(e)}")
@@ -457,8 +516,8 @@ def staff_chat():
         if conversation_history and isinstance(conversation_history, list):
             try:
                 from langchain_core.messages import HumanMessage, AIMessage
-                
-                memory = create_staff_conversation_memory(max_history=20)
+
+                memory = create_staff_conversation_memory(max_history=6)
                 
                 # Convert frontend message format to LangChain messages
                 for msg in conversation_history:

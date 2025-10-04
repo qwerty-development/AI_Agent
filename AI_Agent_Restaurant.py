@@ -887,14 +887,23 @@ llm = ChatGoogleGenerativeAI(
 llm = llm.bind_tools(tools)
 
 def staff_agent_node(state: StaffAgentState) -> StaffAgentState:
-    """Our staff agent node that processes messages and generates responses.""" 
+    """Our staff agent node that processes messages and generates responses."""
     messages = state["messages"]
-    
-    # Create the full prompt with system message and conversation
-    full_messages = [SystemMessage(content=system_prompt)] + messages
-    
-    print(f"Sending {len(full_messages)} messages to Staff LLM")
-    
+
+    # OPTIMIZATION: Only add system prompt if this is the first message in the conversation
+    # LangGraph maintains state across iterations, so we don't need to resend it every time
+    # This reduces token usage by ~1000 tokens per LLM call after the first one
+    has_system_message = any(isinstance(msg, SystemMessage) for msg in messages)
+
+    if has_system_message:
+        # System message already in conversation, don't add again
+        full_messages = messages
+    else:
+        # First message in conversation, add system prompt
+        full_messages = [SystemMessage(content=system_prompt)] + messages
+
+    print(f"Sending {len(full_messages)} messages to Staff LLM (system_prompt_included: {not has_system_message})")
+
     # Get response from the model
     response = llm.invoke(full_messages)
     
@@ -954,8 +963,11 @@ staff_app = staff_graph.compile()
 
 # Conversation memory system for staff agent
 class StaffConversationMemory:
-    def __init__(self, max_history: int = 20):
-        """Initialize conversation memory with a maximum history limit."""
+    def __init__(self, max_history: int = 6):
+        """Initialize conversation memory with a maximum history limit.
+        Reduced from 20 to 6 messages to optimize token usage and reduce costs.
+        6 messages = 3 turns of conversation (user + assistant pairs), which is sufficient for context.
+        """
         self.messages = []
         self.max_history = max_history
     
@@ -978,8 +990,9 @@ class StaffConversationMemory:
         """Get the number of messages in history."""
         return len(self.messages)
 
-def create_staff_conversation_memory(max_history: int = 20):
-    """Create a new conversation memory instance for staff agent."""
+def create_staff_conversation_memory(max_history: int = 6):
+    """Create a new conversation memory instance for staff agent.
+    Default reduced to 6 messages for cost optimization."""
     return StaffConversationMemory(max_history)
 
 def chat_with_staff_bot(user_input: str, restaurant_id: str = None, memory=None, authenticated_client=None, current_user=None) -> str:

@@ -51,8 +51,11 @@ def get_supabase_client() -> Optional[Client]:
 
 # Conversation memory system
 class ConversationMemory:
-    def __init__(self, max_history: int = 20):
-        """Initialize conversation memory with a maximum history limit."""
+    def __init__(self, max_history: int = 6):
+        """Initialize conversation memory with a maximum history limit.
+        Reduced from 20 to 6 messages to optimize token usage and reduce costs.
+        6 messages = 3 turns of conversation (user + assistant pairs), which is sufficient for context.
+        """
         self.messages: List[BaseMessage] = []
         self.max_history = max_history
     
@@ -78,8 +81,9 @@ class ConversationMemory:
 # Global conversation memory instance for interactive sessions
 conversation_memory = ConversationMemory()
 
-def create_conversation_memory(max_history: int = 20) -> ConversationMemory:
-    """Create a new conversation memory instance for external use."""
+def create_conversation_memory(max_history: int = 6) -> ConversationMemory:
+    """Create a new conversation memory instance for external use.
+    Default reduced to 6 messages for cost optimization."""
     return ConversationMemory(max_history)
 
 tools = []
@@ -534,12 +538,21 @@ llm = llm.bind_tools(tools)
 def agent_node(state: AgentState) -> AgentState:
     """Our agent node that processes messages and generates responses."""
     messages = state["messages"]
-    
-    # Create the full prompt with system message and conversation
-    full_messages = [SystemMessage(content=system_prompt)] + messages
-    
-    print(f"Sending {len(full_messages)} messages to LLM")
-    
+
+    # OPTIMIZATION: Only add system prompt if this is the first message in the conversation
+    # LangGraph maintains state across iterations, so we don't need to resend it every time
+    # This reduces token usage by ~1000 tokens per LLM call after the first one
+    has_system_message = any(isinstance(msg, SystemMessage) for msg in messages)
+
+    if has_system_message:
+        # System message already in conversation, don't add again
+        full_messages = messages
+    else:
+        # First message in conversation, add system prompt
+        full_messages = [SystemMessage(content=system_prompt)] + messages
+
+    print(f"Sending {len(full_messages)} messages to LLM (system_prompt_included: {not has_system_message})")
+
     # Get response from the model
     response = llm.invoke(full_messages)
     

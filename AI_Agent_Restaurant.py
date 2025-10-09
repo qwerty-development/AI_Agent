@@ -1314,7 +1314,8 @@ def chat_with_staff_bot(user_input: str, restaurant_id: str = None, memory=None,
         if 'original_client' in locals():
             supabase = original_client
         print(f"Error running staff agent: {e}")
-        return f"Sorry, I encountered an error: {str(e)}"
+        # Re-raise the exception so Flask can log it properly
+        raise
 
 # Interactive chat function for testing
 def start_staff_interactive_chat():

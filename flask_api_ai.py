@@ -366,10 +366,10 @@ def chat():
         return jsonify(response_data), 200
         
     except Exception as e:
-        logger.error(f"Error in chat endpoint: {str(e)}")
+        logger.error(f"Error in chat endpoint: {str(e)}", exc_info=True)
         return jsonify({
             'error': 'Internal server error',
-            'message': str(e),
+            'message': "I'm sorry, an error occurred. Please try again later.",
             'status': 'error'
         }), 500
 
@@ -397,10 +397,10 @@ def chat_reset():
         }), 200
         
     except Exception as e:
-        logger.error(f"Error in chat reset endpoint: {str(e)}")
+        logger.error(f"Error in chat reset endpoint: {str(e)}", exc_info=True)
         return jsonify({
             'error': 'Internal server error',
-            'message': str(e),
+            'message': "I'm sorry, an error occured please try again later.",
             'status': 'error'
         }), 500
 
@@ -448,10 +448,10 @@ def get_cuisine_types():
         }), 200
         
     except Exception as e:
-        logger.error(f"Error getting cuisine types: {str(e)}")
+        logger.error(f"Error getting cuisine types: {str(e)}", exc_info=True)
         return jsonify({
             'error': 'Internal server error',
-            'message': str(e),
+            'message': 'Unable to fetch cuisine types at this time',
             'status': 'error'
         }), 500
 
@@ -555,10 +555,10 @@ def staff_chat():
         }), 200
         
     except Exception as e:
-        logger.error(f"Error in staff chat endpoint: {str(e)}")
+        logger.error(f"Error in staff chat endpoint: {str(e)}", exc_info=True)
         return jsonify({
             'error': 'Internal server error',
-            'message': str(e),
+            'message': "I'm sorry, an error occurred. Please try again later.",
             'status': 'error'
         }), 500
 
@@ -578,10 +578,10 @@ def test_endpoint():
         }), 200
         
     except Exception as e:
-        logger.error(f"Error in test endpoint: {str(e)}")
+        logger.error(f"Error in test endpoint: {str(e)}", exc_info=True)
         return jsonify({
             'error': 'Internal server error',
-            'message': str(e),
+            'message': "I'm sorry, an error occurred. Please try again later.",
             'status': 'error'
         }), 500
 
@@ -626,10 +626,10 @@ def admin_stats():
         }), 200
         
     except Exception as e:
-        logger.error(f"Error in admin stats endpoint: {str(e)}")
+        logger.error(f"Error in admin stats endpoint: {str(e)}", exc_info=True)
         return jsonify({
             'error': 'Internal server error',
-            'message': str(e),
+            'message': "I'm sorry, an error occurred. Please try again later.",
             'status': 'error'
         }), 500
 
@@ -642,8 +642,10 @@ def not_found(error):
 
 @app.errorhandler(500)
 def internal_error(error):
+    logger.error(f"Internal server error: {str(error)}", exc_info=True)
     return jsonify({
         'error': 'Internal server error',
+        'message': "I'm sorry, an error occurred. Please try again later.",
         'status': 'error'
     }), 500
 

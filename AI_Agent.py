@@ -840,8 +840,7 @@ def chat_with_bot(user_input: str, memory: Optional[ConversationMemory] = None, 
             
     except Exception as e:
         print(f"Error running agent: {e}")
-        # Re-raise the exception so Flask can log it properly
-        raise
+        return f"Sorry, I encountered an error: {str(e)}"
 
 # Interactive chat function for testing (kept for local development)
 def start_interactive_chat():

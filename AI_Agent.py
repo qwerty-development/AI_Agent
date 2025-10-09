@@ -529,7 +529,7 @@ tools.append(searchTimeRange)
 
 # Initialize the model
 llm = ChatGoogleGenerativeAI(
-    model="gemini-2.5-flash", 
+    model="gemini-2.5-flash-lite", 
     api_key=os.getenv("GOOGLE_API_KEY"),
     temperature=0
 )

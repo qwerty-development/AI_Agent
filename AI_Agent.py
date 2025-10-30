@@ -195,6 +195,11 @@ RESTAURANTS_TO_SHOW: restaurant-1,restaurant-2,restaurant-3
 4. **PARTY SIZE:** Use user's preferred_party_size from profile if available, otherwise assume 2 people (state this clearly)
 5. **FINISH:** Call finishedUsingTools
 
+### For Cuisine List Questions:
+- When the user asks about available cuisines (e.g., "what cuisines do you have", "list cuisines", "available cuisine types"), DO NOT call any tools.
+- Use the provided context line that starts with "AVAILABLE CUISINE TYPES:" to answer directly.
+- Keep the response concise and avoid fetching restaurants.
+
 ## STRICT CONSTRAINTS
 **SCOPE LIMITATIONS:**
 - ONLY answer restaurant, dining, and reservation questions
@@ -253,28 +258,28 @@ def fetch_user_profile(user_id: str, client: Optional[Client] = None) -> Optiona
         print(f"Error fetching user profile: {e}")
         return None
 
-@tool
 def getAllCuisineTypes() -> str:
-    """Return the unique cuisine types available in the application"""
-    print("AI is looking for cuisine types")
+    """Return the unique cuisine types available in the application as a JSON list string.
+    Note: This is no longer exposed as an AI tool; it's used internally and by the API.
+    """
+    print("Fetching cuisine types (internal)")
     try:
-        if not supabase:
+        client = get_supabase_client()
+        if not client:
             return json.dumps([])
-        result = supabase.table("restaurants").select("cuisine_type").execute()
+        result = client.table("restaurants").select("cuisine_type").execute()
         cuisineTypes = result.data
-        
+
         if not cuisineTypes:
-            return "Currently we have no cuisine types available"
-        
+            return json.dumps([])
+
         # Extract unique cuisine types
         unique_cuisines = list(set([item['cuisine_type'] for item in cuisineTypes if item.get('cuisine_type')]))
         print(f"Found cuisine types: {unique_cuisines}")
         return json.dumps(unique_cuisines)
     except Exception as e:
         print(f"Error fetching cuisine types: {e}")
-        return "Error retrieving cuisine types"
-
-tools.append(getAllCuisineTypes)
+        return json.dumps([])
 
 @tool
 def getRestaurantsByCuisineType(cuisineType: str) -> str:
@@ -623,6 +628,28 @@ def chat_with_bot(user_input: str, memory: Optional[ConversationMemory] = None, 
     If authenticated_client is provided, uses it for database operations with RLS.
     """
     try:
+        # Early handle: user asks to list available cuisines -> answer directly, no LLM/tools
+        intent_text_early = (user_input or "").lower()
+        if "cuisine" in intent_text_early or "cuisines" in intent_text_early:
+            list_markers = [
+                "what are", "what's", "list", "available", "do you have", "which",
+                "what kind", "types of cuisine", "cuisine types", "type of cuisine", "types"
+            ]
+            if any(m in intent_text_early for m in list_markers) and not any(
+                k in intent_text_early for k in ["near", "find", "recommend", "suggest", "restaurant", "restaurants", "where"]
+            ):
+                try:
+                    cuisines_raw = getAllCuisineTypes()
+                    cuisines_list = json.loads(cuisines_raw) if cuisines_raw else []
+                except Exception:
+                    cuisines_list = []
+                if isinstance(cuisines_list, list) and cuisines_list:
+                    try:
+                        cuisines_list = sorted(set(map(str, cuisines_list)), key=lambda x: x.lower())
+                    except Exception:
+                        cuisines_list = list(dict.fromkeys(map(str, cuisines_list)))
+                    return "The available cuisine types are: " + ", ".join(cuisines_list) + "."
+                return "I couldn't retrieve the cuisine types right now. Please try again shortly."
         # Use authenticated client if provided, otherwise fall back to global supabase client
         client_to_use = authenticated_client if authenticated_client else supabase
         
@@ -647,12 +674,16 @@ def chat_with_bot(user_input: str, memory: Optional[ConversationMemory] = None, 
         # Lightweight intent detection to nudge the LLM to use tools and include IDs
         ui_lower = (user_input or "").lower()
         discovery_triggers = [
-            "recommend", "suggest", "find", "show", "options", "restaurant", "places", "cuisine",
+            "recommend", "suggest", "find", "show", "options", "restaurant", "places",
             "near", "around", "best", "top", "where to",
             "available", "availability", "slot", "slots", "time", "times", "book", "reserve", "reservation",
             "today", "tonight", "tomorrow", "opening", "openings"
         ]
         should_nudge = any(t in ui_lower for t in discovery_triggers)
+        # Avoid nudging for cuisine list-only queries
+        if ("cuisine" in ui_lower or "cuisines" in ui_lower) and any(m in ui_lower for m in ["what", "list", "available", "types", "which", "do you have"]):
+            if not any(k in ui_lower for k in ["find", "recommend", "suggest", "near", "around", "restaurant", "restaurants"]):
+                should_nudge = False
 
         # Create profile context message if user profile is available
         profile_message = None
@@ -673,6 +704,21 @@ def chat_with_bot(user_input: str, memory: Optional[ConversationMemory] = None, 
             
             if profile_info:
                 profile_message = SystemMessage(content=f"USER PROFILE: {' | '.join(profile_info)}")
+
+        # Fetch cuisine types once per request and provide as context (no tool call)
+        cuisines_message = None
+        try:
+            cuisines_raw = getAllCuisineTypes()
+            cuisines_list = json.loads(cuisines_raw) if cuisines_raw else []
+            if isinstance(cuisines_list, list) and cuisines_list:
+                # Keep stable order for readability
+                try:
+                    cuisines_list = sorted(set(map(str, cuisines_list)), key=lambda x: x.lower())
+                except Exception:
+                    cuisines_list = list(dict.fromkeys(map(str, cuisines_list)))
+                cuisines_message = SystemMessage(content="AVAILABLE CUISINE TYPES: " + ", ".join(cuisines_list))
+        except Exception:
+            cuisines_message = None
 
         # Create guiding message for tool usage
         guiding_message = None
@@ -697,6 +743,8 @@ def chat_with_bot(user_input: str, memory: Optional[ConversationMemory] = None, 
         messages_to_add = []
         if profile_message:
             messages_to_add.append(profile_message)
+        if cuisines_message:
+            messages_to_add.append(cuisines_message)
         if guiding_message:
             messages_to_add.append(guiding_message)
         messages_to_add.append(user_message)

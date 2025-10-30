@@ -415,25 +415,11 @@ def get_cuisine_types():
                 'status': 'error'
             }), 503
 
-        # Call the tool safely to get cuisine types (@tool wraps it as a Tool object)
+        # Call internal helper directly to get cuisine types (no tool call)
         try:
-            # Preferred path for no-arg tools
-            cuisine_types_str = getAllCuisineTypes.invoke({})
+            cuisine_types_str = getAllCuisineTypes()
         except Exception:
-            try:
-                # Some versions accept a positional empty string
-                cuisine_types_str = getAllCuisineTypes("")
-            except Exception:
-                try:
-                    # Older API
-                    cuisine_types_str = getAllCuisineTypes.run("")
-                except Exception:
-                    try:
-                        # Access original function if exposed
-                        func = getattr(getAllCuisineTypes, "func", None)
-                        cuisine_types_str = func() if callable(func) else "[]"
-                    except Exception:
-                        cuisine_types_str = "[]"
+            cuisine_types_str = "[]"
         
         # Parse the JSON response
         import json

@@ -11,12 +11,12 @@ from supabase import create_client, Client
 from typing import cast
 from datetime import datetime, timedelta
 from dateutil import tz
-from availability_tools import (
-    check_any_time_slots as av_check_any_time_slots,
-    get_available_time_slots as av_get_available_time_slots,
-    get_table_options_for_slot as av_get_table_options_for_slot,
-    search_time_range as av_search_time_range,
-)
+# from availability_tools import (
+#     check_any_time_slots as av_check_any_time_slots,
+#     get_available_time_slots as av_get_available_time_slots,
+#     get_table_options_for_slot as av_get_table_options_for_slot,
+#     search_time_range as av_search_time_range,
+# )
 import json
 from typing import List
 
@@ -482,56 +482,56 @@ tools.append(searchRestaurantsAdvanced)
 # Availability tools (backend service key based)
 # -----------------------------
 
-@tool
-def checkAnyTimeSlots(restaurant_id: str, date: str, party_size: int, user_id: Optional[str] = None) -> str:
-    """Return {"available": bool} if at least one slot exists for the given date and party size."""
-    try:
-        available = av_check_any_time_slots(restaurant_id, date, int(party_size), user_id)
-        return json.dumps({"available": bool(available)})
-    except Exception as e:
-        return json.dumps({"error": str(e)})
+# @tool
+# def checkAnyTimeSlots(restaurant_id: str, date: str, party_size: int, user_id: Optional[str] = None) -> str:
+#     """Return {"available": bool} if at least one slot exists for the given date and party size."""
+#     try:
+#         available = av_check_any_time_slots(restaurant_id, date, int(party_size), user_id)
+#         return json.dumps({"available": bool(available)})
+#     except Exception as e:
+#         return json.dumps({"error": str(e)})
 
-tools.append(checkAnyTimeSlots)
+# tools.append(checkAnyTimeSlots)
 
-@tool
-def getAvailableTimeSlots(restaurant_id: str, date: str, party_size: int, user_id: Optional[str] = None) -> str:
-    """Return a JSON list of {time: 'HH:MM', available: true} slots for the day."""
-    try:
-        slots = av_get_available_time_slots(restaurant_id, date, int(party_size), user_id)
-        return json.dumps(slots)
-    except Exception as e:
-        return json.dumps({"error": str(e)})
+# @tool
+# def getAvailableTimeSlots(restaurant_id: str, date: str, party_size: int, user_id: Optional[str] = None) -> str:
+#     """Return a JSON list of {time: 'HH:MM', available: true} slots for the day."""
+#     try:
+#         slots = av_get_available_time_slots(restaurant_id, date, int(party_size), user_id)
+#         return json.dumps(slots)
+#     except Exception as e:
+#         return json.dumps({"error": str(e)})
 
-tools.append(getAvailableTimeSlots)
+# tools.append(getAvailableTimeSlots)
 
-@tool
-def getTableOptionsForSlot(restaurant_id: str, date: str, time: str, party_size: int, user_id: Optional[str] = None) -> str:
-    """Return table options for a specific time slot, or null if none."""
-    try:
-        # Note: The underlying function may not use user_id, but we keep it for consistency
-        options = av_get_table_options_for_slot(restaurant_id, date, time, int(party_size))
-        return json.dumps(options)
-    except Exception as e:
-        return json.dumps({"error": str(e)})
+# @tool
+# def getTableOptionsForSlot(restaurant_id: str, date: str, time: str, party_size: int, user_id: Optional[str] = None) -> str:
+#     """Return table options for a specific time slot, or null if none."""
+#     try:
+#         # Note: The underlying function may not use user_id, but we keep it for consistency
+#         options = av_get_table_options_for_slot(restaurant_id, date, time, int(party_size))
+#         return json.dumps(options)
+#     except Exception as e:
+#         return json.dumps({"error": str(e)})
 
-tools.append(getTableOptionsForSlot)
+# tools.append(getTableOptionsForSlot)
 
-@tool
-def searchTimeRange(restaurant_id: str, date: str, start_time: str, end_time: str, party_size: int, user_id: Optional[str] = None) -> str:
-    """Return best table options for all available slots within a time range on a given date."""
-    try:
-        results = av_search_time_range(restaurant_id, date, start_time, end_time, int(party_size), user_id)
-        return json.dumps(results)
-    except Exception as e:
-        return json.dumps({"error": str(e)})
+# @tool
+# def searchTimeRange(restaurant_id: str, date: str, start_time: str, end_time: str, party_size: int, user_id: Optional[str] = None) -> str:
+#     """Return best table options for all available slots within a time range on a given date."""
+#     try:
+#         results = av_search_time_range(restaurant_id, date, start_time, end_time, int(party_size), user_id)
+#         return json.dumps(results)
+#     except Exception as e:
+#         return json.dumps({"error": str(e)})
 
-tools.append(searchTimeRange)
+# tools.append(searchTimeRange)
 
 # Initialize the model
 llm = ChatGoogleGenerativeAI(
     model="gemini-2.5-flash-lite", 
     api_key=os.getenv("GOOGLE_API_KEY"),
-    temperature=0
+    temperature=0.1
 )
 llm = llm.bind_tools(tools)
 

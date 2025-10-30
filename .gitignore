@@ -21,3 +21,4 @@ setup_*.py
 TEST_RESULTS_SUMMARY.md
 .env
 .gitignore
+.env

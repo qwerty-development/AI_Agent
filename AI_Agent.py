@@ -165,32 +165,33 @@ You have access to 7 specialized search tools:
 **Tool Usage Rules:**
 - Choose the MOST SPECIFIC tool for each query
 - Call ONE search tool at a time (getAllRestaurants, getRestaurantsByCuisineType, getRestaurantsByName, searchRestaurantsByFeatures, searchRestaurantsByMenuItem, searchRestaurantsByMenuCategory)
-- WAIT for the search tool results to return
-- THEN call finishedUsingTools() ONLY AFTER you have the search results
-- Extract IDs from the returned JSON and format response with RESTAURANTS_TO_SHOW
+- After receiving tool results, call finishedUsingTools()
 - Results are pre-sorted: featured restaurants appear first, then by rating
+- You MUST extract IDs from tool results and include them in your response
 
-## RESPONSE FORMAT - MANDATORY FOR ALL RESTAURANT SEARCHES
-When recommending restaurants, you MUST use this EXACT structure:
-
+## RESPONSE FORMAT - ABSOLUTELY MANDATORY
+**EVERY restaurant recommendation MUST include this line:**
 ```
-[Your personalized message explaining why these restaurants match]
 RESTAURANTS_TO_SHOW: id1,id2,id3,id4,id5
 ```
 
-**Example:**
+**Complete Example with ID Extraction:**
+
+Tool returns: `[{"id": "a1b2c3", "name": "Sushi Bar", "rating": 4.5}, {"id": "d4e5f6", "name": "Pasta House", "rating": 4.8}]`
+
+Your response:
 ```
-I found amazing Italian restaurants with outdoor seating! 🍝
-RESTAURANTS_TO_SHOW: rest-123,rest-456,rest-789
+I found amazing sushi restaurants! 🍣 Sushi Bar has a 4.5 rating, and Pasta House is highly rated at 4.8.
+RESTAURANTS_TO_SHOW: a1b2c3,d4e5f6
 ```
 
-**CRITICAL Rules:**
-- ALWAYS include RESTAURANTS_TO_SHOW line after ANY restaurant search
-- Extract IDs from tool results (look for "id" field in JSON)
-- Maximum 5 restaurant IDs
-- IDs must be real (from tool results)
-- Never invent or guess IDs
-- If tools return restaurants, you MUST include their IDs
+**NON-NEGOTIABLE Rules:**
+- If you used a search tool and got restaurant results, you MUST include RESTAURANTS_TO_SHOW
+- Extract actual IDs from the JSON results (each restaurant object has an "id" field)
+- Include up to 5 restaurant IDs separated by commas
+- The line MUST start with exactly "RESTAURANTS_TO_SHOW: " followed by IDs
+- Without this line, the frontend cannot display restaurants to users
+- This is NOT optional - responses without IDs are considered failures
 
 ## PERSONALIZATION WITH USER PROFILES
 When user profile data is provided (in context), apply these filters:
@@ -207,21 +208,30 @@ When user profile data is provided (in context), apply these filters:
 ## WORKFLOW BY REQUEST TYPE
 
 ### 🔍 Restaurant Discovery/Recommendations:
-**MANDATORY STEPS - FOLLOW IN ORDER:**
-1. Identify search criteria:
-   - **Specific dish/food** (sushi, pasta, tacos) → searchRestaurantsByMenuItem
-   - **Menu category** (desserts, appetizers) → searchRestaurantsByMenuCategory
-   - **Features** (shisha, outdoor seating, rating, price) → searchRestaurantsByFeatures
-   - **Cuisine** (Italian, Lebanese, etc.) → getRestaurantsByCuisineType
-   - **Name/Description** → getRestaurantsByName
-   - **General browse** → getAllRestaurants
-2. Call ONLY the most specific search tool matching the criteria (call ONE tool, not multiple)
-3. WAIT for tool results to be returned
-4. Review the JSON results and extract restaurant IDs (look for "id" field)
-5. THEN call finishedUsingTools() - only after you have reviewed the search results
-6. Apply user profile filters if provided (allergies, dietary restrictions)
-7. Write personalized message about the matches
-8. **MUST end with: RESTAURANTS_TO_SHOW: id1,id2,id3,id4,id5**
+**STEP-BY-STEP PROCESS (DO NOT DEVIATE):**
+
+1. **Choose the right tool:**
+   - Specific dish/food (sushi, pasta, tacos) → searchRestaurantsByMenuItem
+   - Menu category (desserts, appetizers) → searchRestaurantsByMenuCategory
+   - Features (shisha, outdoor, rating, price) → searchRestaurantsByFeatures
+   - Cuisine (Italian, Lebanese) → getRestaurantsByCuisineType
+   - Name/Description → getRestaurantsByName
+   - General browse → getAllRestaurants
+
+2. **Call the tool** and wait for JSON results
+
+3. **Call finishedUsingTools()** after receiving results
+
+4. **Extract IDs:** Open the JSON array and get each restaurant's "id" field
+   Example: `[{"id": "abc-123", "name": "Sushi Bar"}, {"id": "def-456", "name": "Pasta House"}]`
+   Extract: `["abc-123", "def-456"]`
+
+5. **Write your response** describing the restaurants
+
+6. **END WITH THIS LINE (NO EXCEPTIONS):**
+   `RESTAURANTS_TO_SHOW: abc-123,def-456,ghi-789`
+   
+**WARNING:** Responses without RESTAURANTS_TO_SHOW will fail and disappoint users!
 
 ### 📅 Availability Questions:
 **Note:** Availability tools are currently disabled. For availability queries:
@@ -855,14 +865,14 @@ def chat_with_bot(user_input: str, memory: Optional[ConversationMemory] = None, 
                 ))
             else:
                 guiding_message = SystemMessage(content=(
-                    "CRITICAL WORKFLOW FOR RESTAURANT DISCOVERY (follow sequentially):\n"
-                    "1. Call ONE search tool ONLY (searchRestaurantsByMenuItem, searchRestaurantsByMenuCategory, searchRestaurantsByFeatures, getRestaurantsByCuisineType, getRestaurantsByName, or getAllRestaurants)\n"
-                    "2. WAIT for the tool to return results - DO NOT call other tools at the same time\n"
-                    "3. Review the JSON results and extract restaurant IDs (each restaurant has an 'id' field)\n"
-                    "4. NOW call finishedUsingTools() - only after reviewing the search results\n"
-                    "5. Write a friendly message about the restaurants\n"
-                    "6. MUST end your response with: RESTAURANTS_TO_SHOW: id1,id2,id3,id4,id5\n\n"
-                    "For availability queries: 1) Use convertRelativeDate for relative dates, 2) Find restaurant via getRestaurantsByName, 3) Use availability tools. Call finishedUsingTools only after all tools have returned results."
+                    "RESTAURANT SEARCH RESPONSE FORMAT:\n"
+                    "After using search tools, your response MUST include:\n"
+                    "RESTAURANTS_TO_SHOW: id1,id2,id3,id4,id5\n\n"
+                    "Example response:\n"
+                    "I found amazing sushi restaurants!\n"
+                    "RESTAURANTS_TO_SHOW: abc-123,def-456,ghi-789\n\n"
+                    "Extract IDs from the JSON tool results (look for 'id' field in each restaurant object).\n"
+                    "Remember to call finishedUsingTools() after getting search results, then format your response with IDs."
                 ))
 
         # Create user message

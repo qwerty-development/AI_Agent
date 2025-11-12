@@ -128,99 +128,150 @@ def convertRelativeDate(relative_date: str) -> str:
 tools.append(convertRelativeDate)
 
 system_prompt = """
-You are a specialized restaurant assistant for Plate your name is DineMate, a restaurant reservation app.
+You are DineMate, a specialized restaurant discovery assistant for Plate - a restaurant reservation platform.
 
 ## YOUR ROLE
-Your ONLY responsibilities are to:
-1. Help users find restaurants based on their preferences
-2. Provide personalized recommendations using user profile data (allergies, dietary restrictions, favorite cuisines, preferred party size)
-3. Provide information about restaurants (cuisine, price, features, ratings)
-4. Answer questions about restaurant availability and booking policies
-5. Maintain a friendly and professional tone
+Help users discover perfect restaurants by:
+1. Understanding preferences (cuisine, atmosphere, special features)
+2. Providing personalized recommendations using user profiles (allergies, dietary restrictions, favorite cuisines)
+3. Explaining restaurant details (cuisine, price, ratings, features)
+4. Answering general questions about dining and reservations
+5. Maintaining a friendly, conversational tone
 
-## AVAILABLE DATA
-You have access to comprehensive restaurant information:
-- Restaurant names, descriptions, and cuisine types
-- Price ranges (1-4) and average ratings
-- Features: outdoor seating, parking, shisha availability
-- Opening hours and booking policies
-- Real-time availability data
+## AVAILABLE TOOLS
+You have access to 7 specialized search tools:
 
-## RESPONSE FORMAT
-When showing restaurants to users, ALWAYS use this exact format:
+1. **getAllRestaurants()** - Browse all restaurants (pre-sorted by featured status & ratings)
+2. **getRestaurantsByCuisineType(cuisineType)** - Search by specific cuisine (e.g., "Italian", "Lebanese")
+3. **getRestaurantsByName(query)** - Search by restaurant name or description
+4. **searchRestaurantsByFeatures(outdoor_seating, shisha_available, min_rating, price_range)** - Filter by features
+   - Use this for: "restaurants with shisha", "outdoor seating", "highly rated", "budget-friendly"
+   - All parameters are optional, combine as needed
+5. **searchRestaurantsByMenuItem(query)** - Find restaurants serving specific dishes
+   - Use this for: "sushi", "pasta carbonara", "vegan burger", "chocolate cake", "tacos"
+   - Searches menu item names and descriptions
+6. **searchRestaurantsByMenuCategory(category_name)** - Find restaurants with specific menu categories
+   - Use this for: "Desserts", "Appetizers", "Seafood", "Cocktails", "Vegetarian Options"
+7. **convertRelativeDate(relative_date)** - Convert "today", "tomorrow" to dates
 
-**Structure:**
-1. Provide your conversational response
-2. Add "RESTAURANTS_TO_SHOW:" on a new line
-3. List restaurant IDs separated by commas (max 5 IDs)
+**Tool Selection Priority:**
+1. Specific dish/food requests → **searchRestaurantsByMenuItem** (e.g., "sushi", "tiramisu", "tacos")
+2. Menu category requests → **searchRestaurantsByMenuCategory** (e.g., "desserts", "appetizers")
+3. Feature requests (shisha, outdoor, rating, price) → **searchRestaurantsByFeatures**
+4. Cuisine requests → **getRestaurantsByCuisineType**
+5. Name/description search → **getRestaurantsByName**
+6. General browse → **getAllRestaurants**
+
+**Tool Usage Rules:**
+- Choose the MOST SPECIFIC tool for each query
+- Call ONE search tool at a time (getAllRestaurants, getRestaurantsByCuisineType, getRestaurantsByName, searchRestaurantsByFeatures, searchRestaurantsByMenuItem, searchRestaurantsByMenuCategory)
+- WAIT for the search tool results to return
+- THEN call finishedUsingTools() ONLY AFTER you have the search results
+- Extract IDs from the returned JSON and format response with RESTAURANTS_TO_SHOW
+- Results are pre-sorted: featured restaurants appear first, then by rating
+
+## RESPONSE FORMAT - MANDATORY FOR ALL RESTAURANT SEARCHES
+When recommending restaurants, you MUST use this EXACT structure:
+
+```
+[Your personalized message explaining why these restaurants match]
+RESTAURANTS_TO_SHOW: id1,id2,id3,id4,id5
+```
 
 **Example:**
 ```
-I found some great Italian restaurants for you!
-RESTAURANTS_TO_SHOW: restaurant-1,restaurant-2,restaurant-3
+I found amazing Italian restaurants with outdoor seating! 🍝
+RESTAURANTS_TO_SHOW: rest-123,rest-456,rest-789
 ```
 
-## RESTAURANT RECOMMENDATION RULES
-- **ALWAYS** use database tools first - never guess or invent restaurant IDs
-- **ALWAYS** prioritize restaurants where ai_featured = true, then by highest average_rating
-- **LIMIT** to maximum 5 restaurant IDs
-- **CALL** finishedUsingTools after completing any tool usage
+**CRITICAL Rules:**
+- ALWAYS include RESTAURANTS_TO_SHOW line after ANY restaurant search
+- Extract IDs from tool results (look for "id" field in JSON)
+- Maximum 5 restaurant IDs
+- IDs must be real (from tool results)
+- Never invent or guess IDs
+- If tools return restaurants, you MUST include their IDs
 
-## WORKFLOW GUIDELINES
+## PERSONALIZATION WITH USER PROFILES
+When user profile data is provided (in context), apply these filters:
 
-### For Restaurant Discovery/Recommendations:
-1. Use appropriate search tool (by cuisine, name, featured, or advanced filters)
-2. **IF USER PROFILE PROVIDED:** Consider user's allergies, dietary restrictions, and favorite cuisines
-3. Filter recommendations based on user's allergies and dietary restrictions when available
-4. Prioritize user's favorite cuisines when provided
-5. Format response with RESTAURANTS_TO_SHOW
-6. Call finishedUsingTools
+✅ **Must Consider:**
+- **Allergies** - Exclude incompatible restaurants
+- **Dietary Restrictions** - Filter by dietary_options field
+- **Favorite Cuisines** - Prioritize preferred cuisine types
 
-### For User Profile-Based Personalization:
-- User profile data (if available) will be provided in conversation context
-- Always consider allergies and dietary_restrictions when recommending restaurants
-- Use preferred_party_size for availability queries if not specified by user
-- Mention user's favorite_cuisines in recommendations when relevant
-- Reference loyalty_points for special offers or tier-based suggestions
+📊 **Use for Context:**
+- **Preferred Party Size** - Default for availability queries
+- **Loyalty Points** - Mention rewards/tier benefits if relevant
 
-### For Availability Questions:
-1. **FIRST:** Convert relative dates using convertRelativeDate tool
-   - "today", "tomorrow", "tonight" → YYYY-MM-DD format
-2. **SECOND:** Find restaurant using getRestaurantsByName
-3. **THIRD:** Use availability tools with converted date:
-   - checkAnyTimeSlots (yes/no availability)
-   - getAvailableTimeSlots (list specific times)
-   - getTableOptionsForSlot (table details for specific time)
-   - searchTimeRange (explore time windows)
-4. **PARTY SIZE:** Use user's preferred_party_size from profile if available, otherwise assume 2 people (state this clearly)
-5. **FINISH:** Call finishedUsingTools
+## WORKFLOW BY REQUEST TYPE
 
-### For Cuisine List Questions:
-- When the user asks about available cuisines (e.g., "what cuisines do you have", "list cuisines", "available cuisine types"), DO NOT call any tools.
-- Use the provided context line that starts with "AVAILABLE CUISINE TYPES:" to answer directly.
-- Keep the response concise and avoid fetching restaurants.
+### 🔍 Restaurant Discovery/Recommendations:
+**MANDATORY STEPS - FOLLOW IN ORDER:**
+1. Identify search criteria:
+   - **Specific dish/food** (sushi, pasta, tacos) → searchRestaurantsByMenuItem
+   - **Menu category** (desserts, appetizers) → searchRestaurantsByMenuCategory
+   - **Features** (shisha, outdoor seating, rating, price) → searchRestaurantsByFeatures
+   - **Cuisine** (Italian, Lebanese, etc.) → getRestaurantsByCuisineType
+   - **Name/Description** → getRestaurantsByName
+   - **General browse** → getAllRestaurants
+2. Call ONLY the most specific search tool matching the criteria (call ONE tool, not multiple)
+3. WAIT for tool results to be returned
+4. Review the JSON results and extract restaurant IDs (look for "id" field)
+5. THEN call finishedUsingTools() - only after you have reviewed the search results
+6. Apply user profile filters if provided (allergies, dietary restrictions)
+7. Write personalized message about the matches
+8. **MUST end with: RESTAURANTS_TO_SHOW: id1,id2,id3,id4,id5**
 
-## STRICT CONSTRAINTS
-**SCOPE LIMITATIONS:**
-- ONLY answer restaurant, dining, and reservation questions
-- DO NOT provide code, programming solutions, or technical implementations
-- DO NOT answer questions outside restaurant assistance scope
-- Politely redirect non-restaurant topics to restaurant-related subjects
+### 📅 Availability Questions:
+**Note:** Availability tools are currently disabled. For availability queries:
+1. Use convertRelativeDate for "today"/"tomorrow"
+2. Find restaurant with getRestaurantsByName
+3. Inform user to check restaurant's opening hours (from restaurant data)
+4. Guide them to make a reservation through the app
+5. Call finishedUsingTools
 
-**DATA INTEGRITY:**
-- Base ALL responses on available restaurant data
-- Use ONLY the tools provided for restaurant data lookup
-- NEVER fabricate restaurant IDs or information
+### 🍽️ Cuisine Lists:
+When asked "what cuisines do you have?":
+- Use the provided "AVAILABLE CUISINE TYPES:" context
+- DO NOT call tools
+- Return concise, formatted list
 
-**RESPONSE POLICY:**
-- For tool-based responses: ALWAYS call finishedUsingTools when complete
-- For direct responses (general service questions): respond without tools
-- Keep all responses focused on restaurant discovery and booking assistance
+## CONVERSATION GUIDELINES
+
+**Stay Focused:**
+- ONLY answer restaurant/dining questions
+- Politely redirect off-topic requests: "I specialize in restaurant recommendations. How can I help you find a great place to eat?"
+
+**Be Conversational:**
+- Use natural language, not robotic responses
+- Show enthusiasm about food and dining
+- Ask clarifying questions when needed (party size, cuisine preference, occasion)
+
+**Data Integrity:**
+- Base ALL answers on real tool data
+- Never fabricate restaurant information
+- If no matches found, suggest alternatives
+
+## IMPORTANT CONSTRAINTS
+❌ **Never Do:**
+- Provide code, technical solutions, or programming help
+- Discuss topics outside restaurant/dining
+- Make up restaurant IDs or details
+- Call tools for cuisine lists (use provided context)
+
+✅ **Always Do:**
+- Call finishedUsingTools after tool usage
+- Use RESTAURANTS_TO_SHOW format for recommendations
+- Consider user profile data when available
+- Select the most specific tool for each query
 """
-restaurants_table_columns:str = "id, name, description, address, tags, opening_time, closing_time, cuisine_type, price_range, average_rating, dietary_options, ambiance_tags, outdoor_seating, ai_featured"
+restaurants_table_columns:str = "id, name, description, address, tags, opening_time, closing_time, cuisine_type, price_range, average_rating, dietary_options, ambiance_tags, outdoor_seating, shisha_available, ai_featured"
 @tool
 def finishedUsingTools() -> str:
-    """Call this when you're done using tools and ready to respond."""
+    """Call this ONLY AFTER all search tools have returned their results and you have reviewed them.
+    DO NOT call this at the same time as other tools - wait for search results first.
+    This signals you are ready to provide the final response with restaurant IDs."""
     print("AI finished using tools")
     return "Tools usage completed. Ready to provide response."
 
@@ -316,7 +367,7 @@ tools.append(getRestaurantsByCuisineType)
 
 @tool
 def getAllRestaurants() -> str:
-    """Request all restaurants with all their info from the database"""
+    """Request all restaurants with all their info from the database. Returns top 20 restaurants sorted by featured status and rating."""
     print("AI is looking for all restaurants")
     try:
         client = get_supabase_client()
@@ -328,14 +379,15 @@ def getAllRestaurants() -> str:
             .select(restaurants_table_columns)
             .order("ai_featured", desc=True)
             .order("average_rating", desc=True)
-            .limit(50)
+            .eq("status", "active")
+            .limit(100)
             .execute()
         )
         restaurants = result.data
 
         if not restaurants:
             return "No restaurants found"
-        print("the restaurants found are: "+str(restaurants))
+        print(f"Found {len(restaurants)} restaurants")
         return json.dumps(restaurants)
     
     except Exception as e:
@@ -344,32 +396,6 @@ def getAllRestaurants() -> str:
 
 tools.append(getAllRestaurants)
 
-@tool
-def getFeaturedRestaurants(limit: int = 10) -> str:
-    """Return featured restaurants prioritized by rating. Limit defaults to 10."""
-    print("AI is looking for featured restaurants")
-    try:
-        if not supabase:
-            return json.dumps([])
-        lim = max(1, min(int(limit or 10), 100))
-        result = (
-            supabase
-            .table("restaurants")
-            .select(restaurants_table_columns)
-            .eq("ai_featured", True)
-            .order("average_rating", desc=True)
-            .limit(lim)
-            .execute()
-        )
-        restaurants = result.data
-        if not restaurants:
-            return json.dumps([])
-        return json.dumps(restaurants)
-    except Exception as e:
-        print(f"Error fetching featured restaurants: {e}")
-        return json.dumps([])
-
-tools.append(getFeaturedRestaurants)
 
 @tool
 def getRestaurantsByName(query: str) -> str:
@@ -412,76 +438,173 @@ def getRestaurantsByName(query: str) -> str:
 tools.append(getRestaurantsByName)
 
 @tool
-def searchRestaurantsAdvanced(filters_json: str) -> str:
-    """Advanced restaurant search. Accepts a JSON string with optional fields: 
-    {"cuisine":"italian","price_min":1,"price_max":3,"rating_min":4,"has_outdoor":true,"tags":["shisha","parking"],"ambiance":["romantic"]}
-    Returns a JSON list of restaurants sorted by featured then rating.
-    """
-    print(f"AI is running advanced restaurant search with filters: {filters_json}")
+def searchRestaurantsByFeatures(outdoor_seating: Optional[bool] = None, shisha_available: Optional[bool] = None, min_rating: Optional[float] = None, price_range: Optional[int] = None) -> str:
+    """Search restaurants by common features and filters.
+    - outdoor_seating: True to find restaurants with outdoor seating
+    - shisha_available: True to find restaurants that offer shisha
+    - min_rating: Minimum average rating (e.g., 4.0)
+    - price_range: Exact price level 1-4 (1=budget, 4=expensive)
+    Returns JSON list of matching restaurants sorted by featured status and rating."""
+    
+    print(f"AI is searching by features: outdoor={outdoor_seating}, shisha={shisha_available}, rating>={min_rating}, price={price_range}")
+    
     try:
-        if not supabase:
+        client = get_supabase_client()
+        if not client:
             return json.dumps([])
-        parsed = {}
-        try:
-            parsed = json.loads(filters_json) if filters_json else {}
-        except Exception:
-            parsed = {}
-
-        query = supabase.table("restaurants").select(restaurants_table_columns)
-
-        cuisine = (parsed.get("cuisine") or "").strip()
-        if cuisine:
-            query = query.ilike("cuisine_type", f"%{cuisine}%")
-
-        price_min = parsed.get("price_min")
-        price_max = parsed.get("price_max")
-        if isinstance(price_min, (int, float)):
-            query = query.gte("price_range", int(price_min))
-        if isinstance(price_max, (int, float)):
-            query = query.lte("price_range", int(price_max))
-
-        rating_min = parsed.get("rating_min")
-        if isinstance(rating_min, (int, float)):
-            query = query.gte("average_rating", float(rating_min))
-
-        has_outdoor = parsed.get("has_outdoor")
-        if isinstance(has_outdoor, bool):
-            query = query.eq("outdoor_seating", has_outdoor)
-
-        tags = parsed.get("tags")
-        if isinstance(tags, list) and tags:
-            try:
-                query = query.contains("tags", tags)
-            except Exception:
-                # Fallback to text match if contains not available
-                for t in tags:
-                    query = query.ilike("tags", f"%{t}%")
-
-        ambiance = parsed.get("ambiance")
-        if isinstance(ambiance, list) and ambiance:
-            try:
-                query = query.contains("ambiance_tags", ambiance)
-            except Exception:
-                for a in ambiance:
-                    query = query.ilike("ambiance_tags", f"%{a}%")
-
-        limit = parsed.get("limit")
-        lim = max(1, min(int(limit or 50), 100))
-
+        
+        query = client.table("restaurants").select(restaurants_table_columns)
+        
+        # Apply filters only if specified
+        if outdoor_seating is not None:
+            query = query.eq("outdoor_seating", outdoor_seating)
+        
+        if shisha_available is not None:
+            query = query.eq("shisha_available", shisha_available)
+        
+        if min_rating is not None:
+            query = query.gte("average_rating", float(min_rating))
+        
+        if price_range is not None:
+            query = query.eq("price_range", int(price_range))
+        
         result = (
             query
             .order("ai_featured", desc=True)
             .order("average_rating", desc=True)
-            .limit(lim)
+            .limit(20)
             .execute()
         )
-        items = result.data or []
-        return json.dumps(items)
+        
+        restaurants = result.data
+        
+        if not restaurants:
+            return json.dumps([])
+        
+        print(f"Found {len(restaurants)} restaurants matching features")
+        return json.dumps(restaurants)
+        
     except Exception as e:
-        print(f"Error in advanced search: {e}")
+        print(f"Error searching by features: {e}")
         return json.dumps([])
 
-tools.append(searchRestaurantsAdvanced)
+tools.append(searchRestaurantsByFeatures)
+
+@tool
+def searchRestaurantsByMenuItem(query: str) -> str:
+    """Search restaurants that serve specific menu items or dishes.
+    Searches through menu item names and descriptions.
+    Examples: "sushi", "pasta carbonara", "chocolate cake", "tacos", "vegan burger"
+    Returns JSON list of restaurants that have matching menu items."""
+    
+    q = (query or "").strip()
+    print(f"AI is searching restaurants by menu item: {q}")
+    
+    try:
+        client = get_supabase_client()
+        if not client:
+            return json.dumps([])
+        
+        if not q:
+            return json.dumps([])
+        
+        pattern = f"%{q}%"
+        
+        # Get restaurant IDs that have matching menu items (name or description)
+        menu_result = (
+            client
+            .table("menu_items")
+            .select("restaurant_id")
+            .or_(f"name.ilike.{pattern},description.ilike.{pattern}")
+            .eq("is_available", True)
+            .execute()
+        )
+        
+        restaurant_ids = list(set([item['restaurant_id'] for item in menu_result.data if item.get('restaurant_id')]))
+        
+        if not restaurant_ids:
+            print(f"No menu items found matching '{q}'")
+            return json.dumps([])
+        
+        # Fetch full restaurant details
+        restaurants_result = (
+            client
+            .table("restaurants")
+            .select(restaurants_table_columns)
+            .in_("id", restaurant_ids)
+            .eq("status", "active")
+            .order("ai_featured", desc=True)
+            .order("average_rating", desc=True)
+            .limit(20)
+            .execute()
+        )
+        
+        print(f"Found {len(restaurants_result.data)} restaurants with menu item matching '{q}'")
+        return json.dumps(restaurants_result.data)
+        
+    except Exception as e:
+        print(f"Error searching by menu item: {e}")
+        return json.dumps([])
+
+tools.append(searchRestaurantsByMenuItem)
+
+@tool
+def searchRestaurantsByMenuCategory(category_name: str) -> str:
+    """Search restaurants that offer specific menu categories.
+    Examples: "Desserts", "Appetizers", "Main Courses", "Beverages", "Cocktails", "Seafood"
+    Returns JSON list of restaurants that have the specified category."""
+    
+    cat = (category_name or "").strip()
+    print(f"AI is searching restaurants by menu category: {cat}")
+    
+    try:
+        client = get_supabase_client()
+        if not client:
+            return json.dumps([])
+        
+        if not cat:
+            return json.dumps([])
+        
+        pattern = f"%{cat}%"
+        
+        # Get restaurant IDs that have matching menu categories
+        categories_result = (
+            client
+            .table("menu_categories")
+            .select("restaurant_id")
+            .ilike("name", pattern)
+            .eq("is_active", True)
+            .execute()
+        )
+        
+        restaurant_ids = list(set([item['restaurant_id'] for item in categories_result.data if item.get('restaurant_id')]))
+        
+        if not restaurant_ids:
+            print(f"No restaurants found with category '{cat}'")
+            return json.dumps([])
+        
+        # Fetch full restaurant details
+        restaurants_result = (
+            client
+            .table("restaurants")
+            .select(restaurants_table_columns)
+            .in_("id", restaurant_ids)
+            .eq("status", "active")
+            .order("ai_featured", desc=True)
+            .order("average_rating", desc=True)
+            .limit(20)
+            .execute()
+        )
+        
+        print(f"Found {len(restaurants_result.data)} restaurants with category '{cat}'")
+        return json.dumps(restaurants_result.data)
+        
+    except Exception as e:
+        print(f"Error searching by menu category: {e}")
+        return json.dumps([])
+
+tools.append(searchRestaurantsByMenuCategory)
+
 
 # -----------------------------
 # Availability tools (backend service key based)
@@ -732,8 +855,14 @@ def chat_with_bot(user_input: str, memory: Optional[ConversationMemory] = None, 
                 ))
             else:
                 guiding_message = SystemMessage(content=(
-                    "For this request, if it's about discovering restaurants: call the appropriate search tools and include up to 5 real IDs in a line starting with 'RESTAURANTS_TO_SHOW:'. Prioritize featured and highly-rated restaurants.\n"
-                    "If it's about availability for a specific restaurant: 1) FIRST use convertRelativeDate for any relative dates (today, tomorrow, etc.), 2) locate the restaurant via getRestaurantsByName, 3) use availability tools with the converted date. Assume party size 2 if unspecified; state assumptions. When done with tools, call finishedUsingTools."
+                    "CRITICAL WORKFLOW FOR RESTAURANT DISCOVERY (follow sequentially):\n"
+                    "1. Call ONE search tool ONLY (searchRestaurantsByMenuItem, searchRestaurantsByMenuCategory, searchRestaurantsByFeatures, getRestaurantsByCuisineType, getRestaurantsByName, or getAllRestaurants)\n"
+                    "2. WAIT for the tool to return results - DO NOT call other tools at the same time\n"
+                    "3. Review the JSON results and extract restaurant IDs (each restaurant has an 'id' field)\n"
+                    "4. NOW call finishedUsingTools() - only after reviewing the search results\n"
+                    "5. Write a friendly message about the restaurants\n"
+                    "6. MUST end your response with: RESTAURANTS_TO_SHOW: id1,id2,id3,id4,id5\n\n"
+                    "For availability queries: 1) Use convertRelativeDate for relative dates, 2) Find restaurant via getRestaurantsByName, 3) Use availability tools. Call finishedUsingTools only after all tools have returned results."
                 ))
 
         # Create user message

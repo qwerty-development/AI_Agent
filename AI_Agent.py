@@ -88,6 +88,8 @@ def create_conversation_memory(max_history: int = 6) -> ConversationMemory:
 
 tools = []
 
+# Note: finishedUsingTools tool removed - workflow now ends naturally when AI stops calling tools
+
 @tool
 def convertRelativeDate(relative_date: str) -> str:
     """Convert relative dates like 'today', 'tomorrow', 'yesterday' to YYYY-MM-DD format.
@@ -164,8 +166,8 @@ You have access to 7 specialized search tools:
 
 **Tool Usage Rules:**
 - Choose the MOST SPECIFIC tool for each query
-- Call ONE search tool at a time (getAllRestaurants, getRestaurantsByCuisineType, getRestaurantsByName, searchRestaurantsByFeatures, searchRestaurantsByMenuItem, searchRestaurantsByMenuCategory)
-- After receiving tool results, call finishedUsingTools()
+- Call the appropriate search tool (getAllRestaurants, getRestaurantsByCuisineType, getRestaurantsByName, searchRestaurantsByFeatures, searchRestaurantsByMenuItem, searchRestaurantsByMenuCategory)
+- After receiving results, respond with a friendly message
 - Results are pre-sorted: featured restaurants appear first, then by rating
 - You MUST extract IDs from tool results and include them in your response
 
@@ -208,9 +210,9 @@ When user profile data is provided (in context), apply these filters:
 ## WORKFLOW BY REQUEST TYPE
 
 ### 🔍 Restaurant Discovery/Recommendations:
-**STEP-BY-STEP PROCESS (DO NOT DEVIATE):**
+**SIMPLE 3-STEP PROCESS:**
 
-1. **Choose the right tool:**
+1. **Choose & call the right tool:**
    - Specific dish/food (sushi, pasta, tacos) → searchRestaurantsByMenuItem
    - Menu category (desserts, appetizers) → searchRestaurantsByMenuCategory
    - Features (shisha, outdoor, rating, price) → searchRestaurantsByFeatures
@@ -218,20 +220,17 @@ When user profile data is provided (in context), apply these filters:
    - Name/Description → getRestaurantsByName
    - General browse → getAllRestaurants
 
-2. **Call the tool** and wait for JSON results
-
-3. **Call finishedUsingTools()** after receiving results
-
-4. **Extract IDs:** Open the JSON array and get each restaurant's "id" field
-   Example: `[{"id": "abc-123", "name": "Sushi Bar"}, {"id": "def-456", "name": "Pasta House"}]`
+2. **Extract IDs from results:**
+   Tool returns: `[{"id": "abc-123", "name": "Sushi Bar"}, {"id": "def-456", "name": "Pasta House"}]`
    Extract: `["abc-123", "def-456"]`
 
-5. **Write your response** describing the restaurants
-
-6. **END WITH THIS LINE (NO EXCEPTIONS):**
-   `RESTAURANTS_TO_SHOW: abc-123,def-456,ghi-789`
+3. **Write response with IDs:**
+   ```
+   I found amazing sushi restaurants! 🍣
+   RESTAURANTS_TO_SHOW: abc-123,def-456,ghi-789
+   ```
    
-**WARNING:** Responses without RESTAURANTS_TO_SHOW will fail and disappoint users!
+**CRITICAL:** Always end with `RESTAURANTS_TO_SHOW:` line containing extracted IDs!
 
 ### 📅 Availability Questions:
 **Note:** Availability tools are currently disabled. For availability queries:
@@ -239,7 +238,6 @@ When user profile data is provided (in context), apply these filters:
 2. Find restaurant with getRestaurantsByName
 3. Inform user to check restaurant's opening hours (from restaurant data)
 4. Guide them to make a reservation through the app
-5. Call finishedUsingTools
 
 ### 🍽️ Cuisine Lists:
 When asked "what cuisines do you have?":
@@ -271,21 +269,12 @@ When asked "what cuisines do you have?":
 - Call tools for cuisine lists (use provided context)
 
 ✅ **Always Do:**
-- Call finishedUsingTools after tool usage
 - Use RESTAURANTS_TO_SHOW format for recommendations
+- Extract IDs from tool results and include them
 - Consider user profile data when available
 - Select the most specific tool for each query
 """
 restaurants_table_columns:str = "id, name, description, address, tags, opening_time, closing_time, cuisine_type, price_range, average_rating, dietary_options, ambiance_tags, outdoor_seating, shisha_available, ai_featured"
-@tool
-def finishedUsingTools() -> str:
-    """Call this ONLY AFTER all search tools have returned their results and you have reviewed them.
-    DO NOT call this at the same time as other tools - wait for search results first.
-    This signals you are ready to provide the final response with restaurant IDs."""
-    print("AI finished using tools")
-    return "Tools usage completed. Ready to provide response."
-
-tools.append(finishedUsingTools)
 
 # User profile data is now pre-fetched and provided in conversation context
 # No need for getUserProfile tool - data comes from external source for security
@@ -702,29 +691,24 @@ def agent_node(state: AgentState) -> AgentState:
     return {"messages": [response]}
 
 def should_continue(state: AgentState) -> str:
-    """Determine whether to continue with tools or end the conversation"""
+    """Determine whether to continue with tools or end the conversation.
+    Simple logic: if AI wants to call tools, continue. Otherwise, end."""
     last_message = state["messages"][-1]
-
     
     if isinstance(last_message, AIMessage):
         tool_calls = getattr(last_message, 'tool_calls', []) or []
         print(f"Tool calls found: {len(tool_calls)}")
         
-        # If there are tool calls, check if finishedUsingTools was called
-        for call in tool_calls:
-            print(f"Tool call: {call}")
-            if call["name"] == "finishedUsingTools":
-                print("✅ AI called finishedUsingTools tool - ending")
-                return "end"
-        
-        # If there are other tool calls, continue to tools
+        # If there are tool calls, continue to execute them
         if tool_calls:
             print("🔧 AI has tool calls - continuing to tools")
+            for call in tool_calls:
+                print(f"  - {call['name']}")
             return "continue"
         
-        # If no tool calls and has content, end
+        # No tool calls means AI is done and ready to respond
         if last_message.content:
-            print("💬 AI has content but no tool calls - ending")
+            print("✅ AI ready with response - ending")
             return "end"
     
     print("🔄 Default case - continuing")
@@ -860,8 +844,7 @@ def chat_with_bot(user_input: str, memory: Optional[ConversationMemory] = None, 
                 guiding_message = SystemMessage(content=(
                     "IMPORTANT: User profile data has been provided above. Use this information for personalized recommendations.\n"
                     "For restaurant discovery: 1) Consider user's allergies, dietary restrictions, and favorite cuisines, 2) Call appropriate search tools, 3) Include up to 5 real IDs in 'RESTAURANTS_TO_SHOW:' format.\n"
-                    "For availability queries: 1) Use user's preferred party size from profile, 2) Use convertRelativeDate for relative dates, 3) Find restaurant via getRestaurantsByName, 4) Use availability tools.\n"
-                    "Always call finishedUsingTools when done."
+                    "For availability queries: 1) Use user's preferred party size from profile, 2) Use convertRelativeDate for relative dates, 3) Find restaurant via getRestaurantsByName, 4) Use availability tools."
                 ))
             else:
                 guiding_message = SystemMessage(content=(
@@ -871,8 +854,7 @@ def chat_with_bot(user_input: str, memory: Optional[ConversationMemory] = None, 
                     "Example response:\n"
                     "I found amazing sushi restaurants!\n"
                     "RESTAURANTS_TO_SHOW: abc-123,def-456,ghi-789\n\n"
-                    "Extract IDs from the JSON tool results (look for 'id' field in each restaurant object).\n"
-                    "Remember to call finishedUsingTools() after getting search results, then format your response with IDs."
+                    "Extract IDs from the JSON tool results (look for 'id' field in each restaurant object)."
                 ))
 
         # Create user message
@@ -915,8 +897,41 @@ def chat_with_bot(user_input: str, memory: Optional[ConversationMemory] = None, 
             last_ai_message = ai_messages[-1]
             if last_ai_message.content and last_ai_message.content.strip():
                 text_content = last_ai_message.content.strip()
+                
+                # Check if response already has IDs
                 if "RESTAURANTS_TO_SHOW:" not in text_content:
-                    # Better intent detection: only append restaurant IDs for actual discovery requests
+                    # Try to extract IDs from tool results first (more accurate than generic fallback)
+                    try:
+                        tool_restaurant_ids = []
+                        for tool_msg in tool_messages:
+                            tool_name = getattr(tool_msg, 'name', None)
+                            # Check if this was a restaurant search tool
+                            if tool_name in ['searchRestaurantsByFeatures', 'searchRestaurantsByMenuItem', 
+                                           'searchRestaurantsByMenuCategory', 'getRestaurantsByCuisineType',
+                                           'getRestaurantsByName', 'getAllRestaurants']:
+                                try:
+                                    tool_data = json.loads(tool_msg.content)
+                                    if isinstance(tool_data, list) and tool_data:
+                                        for item in tool_data:
+                                            if isinstance(item, dict) and item.get('id'):
+                                                tool_restaurant_ids.append(str(item['id']))
+                                except Exception:
+                                    pass
+                        
+                        # If we found restaurant IDs from tools, use them
+                        if tool_restaurant_ids:
+                            unique_ids = []
+                            seen = set()
+                            for rid in tool_restaurant_ids:
+                                if rid not in seen:
+                                    seen.add(rid)
+                                    unique_ids.append(rid)
+                            if unique_ids:
+                                return text_content + "\nRESTAURANTS_TO_SHOW: " + ",".join(unique_ids[:5])
+                    except Exception as e:
+                        print(f"Error extracting IDs from tool results: {e}")
+                    
+                    # Fallback: Better intent detection for when to append generic IDs
                     intent_text = (user_input or "").lower()
                     
                     # Availability-related queries (no restaurants needed)
@@ -929,7 +944,8 @@ def chat_with_bot(user_input: str, memory: Optional[ConversationMemory] = None, 
                     discovery_markers = [
                         "recommend", "suggest", "find", "show", "options", "restaurant", "places", "cuisine",
                         "near", "around", "best", "top", "where to", "looking for", "want to eat", "dinner",
-                        "lunch", "breakfast", "food", "italian", "chinese", "mexican", "indian", "japanese"
+                        "lunch", "breakfast", "food", "italian", "chinese", "mexican", "indian", "japanese",
+                        "shisha", "outdoor", "serve", "has", "have", "offer", "offers"
                     ]
                     
                     # Greeting/general queries (no restaurants needed)

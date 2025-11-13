@@ -76,15 +76,18 @@ class AgentState(TypedDict):
     intent: str                      # "restaurant_search", "smalltalk", "info_question"
     search_type: str                 # "cuisine", "dish", "features", "name", "menu_category", "none"
     wants_restaurants: bool          # Whether user wants restaurant recommendations
+    is_refinement: bool              # Whether user is refining previous search
     
     # Category selection (Cerebras-powered)
     selected_categories: List[str]   # Relevant menu categories filtered by Cerebras
     
     # Search filters
     filters: Dict[str, Any]          # Extracted search filters
+    previous_filters: Dict[str, Any] # Previous search filters for refinement
     
     # Results
     restaurants: List[dict]          # Tool execution results
+    previous_restaurants: List[dict] # Previous search results for refinement
     
     # User context
     user_profile: Optional[dict]     # User preferences, allergies, etc.
@@ -215,32 +218,43 @@ Analyze the user's message and classify it into:
    - true if user wants restaurant recommendations
    - false for info questions or smalltalk
 
+4. **is_refinement**: Boolean
+   - true if user is refining/filtering previous results ("with outdoor seating", "cheaper ones", "highly rated")
+   - false if it's a completely new search
+
 Respond with JSON only:
 {
   "intent": "...",
   "search_type": "...",
-  "wants_restaurants": true/false
+  "wants_restaurants": true/false,
+  "is_refinement": true/false
 }
 
 Examples:
 
 User: "Find Italian restaurants"
-Response: {"intent": "restaurant_search", "search_type": "cuisine", "wants_restaurants": true}
+Response: {"intent": "restaurant_search", "search_type": "cuisine", "wants_restaurants": true, "is_refinement": false}
 
 User: "Where can I get sushi?"
-Response: {"intent": "restaurant_search", "search_type": "dish", "wants_restaurants": true}
+Response: {"intent": "restaurant_search", "search_type": "dish", "wants_restaurants": true, "is_refinement": false}
+
+User: "I would like it outdoor" (after previous search)
+Response: {"intent": "restaurant_search", "search_type": "features", "wants_restaurants": true, "is_refinement": true}
+
+User: "Show me cheaper ones" (after previous results)
+Response: {"intent": "restaurant_search", "search_type": "features", "wants_restaurants": true, "is_refinement": true}
 
 User: "Hi, how are you?"
-Response: {"intent": "smalltalk", "search_type": "none", "wants_restaurants": false}
+Response: {"intent": "smalltalk", "search_type": "none", "wants_restaurants": false, "is_refinement": false}
 
 User: "What cuisine types are available?"
-Response: {"intent": "info_question", "search_type": "none", "wants_restaurants": false}
+Response: {"intent": "info_question", "search_type": "none", "wants_restaurants": false, "is_refinement": false}
 
 User: "Show me places with outdoor seating and shisha"
-Response: {"intent": "restaurant_search", "search_type": "features", "wants_restaurants": true}
+Response: {"intent": "restaurant_search", "search_type": "features", "wants_restaurants": true, "is_refinement": false}
 
 User: "Tell me about Babel restaurant"
-Response: {"intent": "restaurant_search", "search_type": "name", "wants_restaurants": true}
+Response: {"intent": "restaurant_search", "search_type": "name", "wants_restaurants": true, "is_refinement": false}
 """
 
 
@@ -276,13 +290,15 @@ def classifier_node(state: AgentState) -> AgentState:
     intent = result.get("intent", "smalltalk")
     search_type = result.get("search_type", "none")
     wants_restaurants = result.get("wants_restaurants", False)
+    is_refinement = result.get("is_refinement", False)
     
-    print(f"✅ [CLASSIFIER] Intent: {intent}, Search: {search_type}, Wants restaurants: {wants_restaurants}")
+    print(f"✅ [CLASSIFIER] Intent: {intent}, Search: {search_type}, Wants restaurants: {wants_restaurants}, Refinement: {is_refinement}")
     
     return {
         "intent": intent,
         "search_type": search_type,
-        "wants_restaurants": wants_restaurants
+        "wants_restaurants": wants_restaurants,
+        "is_refinement": is_refinement
     }
 
 
@@ -474,6 +490,13 @@ def slot_filler_node(state: AgentState) -> AgentState:
         print("⚠️ [SLOT_FILLER] No user message found")
         return {"filters": {}}
     
+    # Check if this is a refinement of previous search
+    is_refinement = state.get("is_refinement", False)
+    previous_filters = state.get("previous_filters", {})
+    
+    if is_refinement and previous_filters:
+        print(f"🔄 [SLOT_FILLER] Refinement mode - merging with previous filters: {previous_filters}")
+    
     # Use pre-selected categories from category_selector_node
     selected_categories = state.get("selected_categories", [])
     
@@ -505,11 +528,25 @@ def slot_filler_node(state: AgentState) -> AgentState:
     slot_messages.append(latest_user_msg)
     
     response = llm.invoke(slot_messages)
-    filters = parse_json_response(response.content)
+    new_filters = parse_json_response(response.content)
     
-    print(f"✅ [SLOT_FILLER] Extracted filters: {filters}")
+    # Merge with previous filters if this is a refinement
+    if is_refinement and previous_filters:
+        # Start with previous filters
+        merged_filters = previous_filters.copy()
+        # Override/add new filters
+        merged_filters.update(new_filters)
+        print(f"✅ [SLOT_FILLER] Merged filters: {merged_filters} (previous: {previous_filters}, new: {new_filters})")
+        final_filters = merged_filters
+    else:
+        print(f"✅ [SLOT_FILLER] Extracted filters: {new_filters}")
+        final_filters = new_filters
     
-    return {"filters": filters}
+    # Store current filters as previous for next interaction
+    return {
+        "filters": final_filters,
+        "previous_filters": final_filters
+    }
 
 
 # ========================================
@@ -592,7 +629,11 @@ def tool_runner_node(state: AgentState) -> AgentState:
         print(f"❌ [TOOL_RUNNER] Error executing tools: {e}")
         restaurants = []
     
-    return {"restaurants": restaurants}
+    # Store results for potential refinement in next turn
+    return {
+        "restaurants": restaurants,
+        "previous_restaurants": restaurants
+    }
 
 
 # ========================================
@@ -898,9 +939,12 @@ def chat_with_bot_v2(
             "intent": "",
             "search_type": "",
             "wants_restaurants": False,
+            "is_refinement": False,
             "selected_categories": [],
             "filters": {},
+            "previous_filters": {},
             "restaurants": [],
+            "previous_restaurants": [],
             "user_profile": user_profile
         }
         

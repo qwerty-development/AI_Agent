@@ -315,6 +315,32 @@ def getAllCuisineTypes() -> str:
         print(f"Error fetching cuisine types: {e}")
         return json.dumps([])
 
+def getAllMenuCategories() -> str:
+    """Return all unique menu category names available across all restaurants as a JSON list string.
+    Used internally to provide context to AI for better category matching.
+    Note: This is not exposed as an AI tool; it's used internally and by the API.
+    """
+    print("Fetching menu categories (internal)")
+    try:
+        client = get_supabase_client()
+        if not client:
+            return json.dumps([])
+        
+        # Fetch all active menu categories
+        result = client.table("menu_categories").select("name").eq("is_active", True).execute()
+        categories = result.data
+
+        if not categories:
+            return json.dumps([])
+
+        # Extract unique category names and sort them
+        unique_categories = sorted(list(set([item['name'].strip() for item in categories if item.get('name')])))
+        print(f"Found {len(unique_categories)} unique menu categories")
+        return json.dumps(unique_categories)
+    except Exception as e:
+        print(f"Error fetching menu categories: {e}")
+        return json.dumps([])
+
 @tool
 def getRestaurantsByCuisineType(cuisineType: str) -> str:
     """Request restaurants from the database based on the cuisine type"""
@@ -533,8 +559,9 @@ tools.append(searchRestaurantsByMenuItem)
 
 @tool
 def searchRestaurantsByMenuCategory(category_name: str) -> str:
-    """Search restaurants that offer specific menu categories.
-    Examples: "Desserts", "Appetizers", "Main Courses", "Beverages", "Cocktails", "Seafood"
+    """Search restaurants that offer specific menu categories with fuzzy matching.
+    Examples: "Desserts", "Appetizers", "Main Courses", "Beverages", "Cocktails", "Seafood", "Sushi"
+    Uses fuzzy matching to handle variations in category naming (e.g., 'sushi' matches 'Sushi & Sashimi').
     Returns JSON list of restaurants that have the specified category."""
     
     cat = (category_name or "").strip()
@@ -548,6 +575,8 @@ def searchRestaurantsByMenuCategory(category_name: str) -> str:
         if not cat:
             return json.dumps([])
         
+        # Use fuzzy matching with wildcards for better matching across different naming styles
+        # This handles cases like "sushi" matching "Sushi & Sashimi", "Japanese Sushi", etc.
         pattern = f"%{cat}%"
         
         # Get restaurant IDs that have matching menu categories

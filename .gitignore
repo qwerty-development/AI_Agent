@@ -23,3 +23,7 @@ TEST_RESULTS_SUMMARY.md
 .gitignore
 .env
 venv
+QUICK_REFERENCE.md
+.gitignore
+V2_DEPLOYMENT_SUMMARY.md
+V1_VS_V2_COMPARISON.md

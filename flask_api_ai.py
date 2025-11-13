@@ -197,12 +197,21 @@ AI_AVAILABLE = False
 STAFF_AI_AVAILABLE = False
 
 try:
-    from AI_Agent import chat_with_bot, getAllCuisineTypes, create_conversation_memory
+    # Import DineMate v2 (new multi-stage pipeline with Cerebras optimization)
+    from dinemate_v2 import chat_with_bot_v2 as chat_with_bot, create_conversation_memory
+    from AI_Agent import getAllCuisineTypes  # Keep using original for this helper
     AI_AVAILABLE = True
-    logger.info("AI Agent imported successfully")
+    logger.info("✅ DineMate v2 (Multi-Stage Pipeline) imported successfully")
 except Exception as e:
-    logger.warning(f"AI Agent import failed: {e}")
-    AI_AVAILABLE = False
+    logger.warning(f"DineMate v2 import failed, falling back to v1: {e}")
+    try:
+        # Fallback to original AI_Agent
+        from AI_Agent import chat_with_bot, getAllCuisineTypes, create_conversation_memory
+        AI_AVAILABLE = True
+        logger.info("AI Agent v1 (fallback) imported successfully")
+    except Exception as e2:
+        logger.warning(f"AI Agent v1 import also failed: {e2}")
+        AI_AVAILABLE = False
 
 try:
     from AI_Agent_Restaurant import chat_with_staff_bot, create_staff_conversation_memory
@@ -217,11 +226,19 @@ except Exception as e:
 def home():
     return jsonify({
         'status': 'healthy',
-        'message': 'Restaurant AI Agent API is running - v2.0',
+        'message': 'DineMate v2 - Multi-Stage Pipeline with Cerebras Optimization - v2.1',
+        'version': 'v2.1',
         'ai_available': AI_AVAILABLE,
         'staff_ai_available': STAFF_AI_AVAILABLE,
+        'features': {
+            'multi_stage_pipeline': True,
+            'cerebras_category_optimization': True,
+            'conversation_memory': True,
+            'user_authentication': True
+        },
         'environment_check': {
             'GOOGLE_API_KEY': 'Set' if os.getenv('GOOGLE_API_KEY') else 'Missing',
+            'CEREBRAS_API_KEY': 'Set' if os.getenv('CEREBRAS_API_KEY') else 'Missing',
             'EXPO_PUBLIC_SUPABASE_URL': 'Set' if os.getenv('EXPO_PUBLIC_SUPABASE_URL') else 'Missing',
             'EXPO_PUBLIC_SUPABASE_ANON_KEY': 'Set' if os.getenv('EXPO_PUBLIC_SUPABASE_ANON_KEY') else 'Missing'
         }
